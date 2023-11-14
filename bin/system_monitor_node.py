@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 import sys
 import rospy
 from diagnostic_msgs.msg import DiagnosticArray
@@ -9,6 +9,7 @@ class Monitor():
     def __init__(self):
         self._pub = rospy.Publisher('~diagnostics', Diagnostic, queue_size=1)
         self._diag_net = DiagnosticNET()
+        self._node_diagnostics = {} 
         self._diag_mem = DiagnosticMEM()
         self._diag_cpu_temp = DiagnosticCPUTemperature()
         self._diag_cpu_usa = DiagnosticCPUUsage()
@@ -16,19 +17,41 @@ class Monitor():
         r = rospy.get_param("rate_param", 0.5)
         self._rate = rospy.Rate(r)
 
+    def update_diagnostics(self, status):
+            node_name = status.name
+
+            # Check if the node is already in the dictionary
+            if node_name not in self._node_diagnostics:
+                self._node_diagnostics[node_name] = {
+                    'Net': DiagnosticNET(),
+                    'Mem': DiagnosticMEM(),
+                    'CpuTemp': DiagnosticCPUTemperature(),
+                    'CpuUsage': DiagnosticCPUUsage(),
+                    'Hdd': DiagnosticHDD()
+                }
+
+            # Update the diagnostics for the corresponding node
+            self.update_net_values(status, node_name)
+            self.update_mem_values(status, node_name)
+            self.update_cpu_temp_values(status, node_name)
+            self.update_cpu_usa_values(status, node_name)
+            self.update_hdd_values(status, node_name)
+
     #Update network values
     def update_net_values(self, status):
-        self._diag_net.name = status.name
-        self._diag_net.message = status.message
+        diag_net = self._node_diagnostics[node_name]['Net']
+        diag_net.name = status.name
+        # self._diag_net.name = status.name
+        # self._diag_net.message = status.message
         self._diag_net.hardware_id = status.hardware_id
         net_status = NetStatus()
         net_status.status = status.values[0].value
         net_status.time = float(status.values[1].value)
-        ifaces = (len(status.values) - 2) / 10
+        ifaces = (len(status.values) - 2) // 10
         ifaces = int(ifaces)
         for i in range(0, ifaces):
             inter = Interface()
-            inter.name = status.values[2+10*i].value
+            inter.name = status.values[2+10*i].value.decode('utf-8') if isinstance(status.values[2+10*i].value, bytes) else status.values[2+10*i].value            
             inter.state = status.values[3+10*i].value
             inter.input = float(status.values[4+10*i].value[:-6])
             inter.output = float(status.values[5+10*i].value[:-6])
@@ -80,7 +103,7 @@ class Monitor():
             core = CoreTemp()
             core.id = i - 2
             try:
-                core.temp = float(status.values[i].value[:-4])
+                core.temp = float(status.values[i].value[:-4]) if isinstance(status.values[i].value, bytes) else float(status.values[i].value[:-4])            
             except ValueError as e:
                 core.temp = -1
             aux_temp.cores.append(core)
@@ -94,7 +117,7 @@ class Monitor():
         self._diag_cpu_usa.hardware_id = status.hardware_id
         aux_usa = CPUUsageStatus()
         len_values = len(status.values)
-        num_cores = (len_values - 6)/6
+        num_cores = (len_values - 6) // 6
         num_cores = int(num_cores)
         aux_usa.status = status.values[0].value
         aux_usa.time = float(status.values[1].value)
@@ -146,7 +169,7 @@ class Monitor():
         for i in range(0,num_disks):
             disk = Disk()
             disk.id = i + 1
-            disk.name = status.values[3 + i * 6].value
+                disk.name = status.values[3 + i * 6].value.decode('utf-8') if isinstance(status.values[3 + i * 6].value, bytes) else status.values[3 + i * 6].value            
             disk.size = float(status.values[4 + i * 6].value[:-1])
             disk.available = float(status.values[5 + i * 6].value[:-1])
             disk.use = float(status.values[6 + i * 6].value[:-1])
@@ -158,15 +181,14 @@ class Monitor():
 
     #Publish info
     def publish_info(self):
-        msg = Diagnostic()
-        msg.diagNet = self._diag_net
-        msg.diagMem = self._diag_mem
-        msg.diagCpuTemp = self._diag_cpu_temp
-        msg.diagCpuUsage = self._diag_cpu_usa
-        msg.diagHdd = self._diag_hdd
-        #self._rate.sleep()
-        self._pub.publish(msg)
-
+        for node_name, diagnostics in self._node_diagnostics.items():
+            msg = Diagnostic()
+            msg.diagNet = diagnostics['Net']
+            msg.diagMem = diagnostics['Mem']
+            msg.diagCpuTemp = diagnostics['CpuTemp']
+            msg.diagCpuUsage = diagnostics['CpuUsage']
+            msg.diagHdd = diagnostics['Hdd']
+            self._pub.publish(msg)
 
 # Print CPU status
 def callback(data):

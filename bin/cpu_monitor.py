@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 ############################################################################
 #    Copyright (C) 2009, Willow Garage, Inc.                               #
 #    Copyright (C) 2013 by Ralf Kaestner                                   #
@@ -62,8 +62,9 @@ cpu_temp_warn = 85.0
 cpu_temp_error = 90.0
 
 num_cores = subprocess.Popen('lscpu | grep "^CPU(s):"',
-                                stdout= subprocess.PIPE,
-                                stderr= subprocess.PIPE, shell=True )
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, shell=True, text=True)
+
 try:
     num_cores = num_cores.communicate()[0].decode()
     num_cores = num_cores[-3]+num_cores[-2]
@@ -199,10 +200,7 @@ class CPUMonitor():
                 return diag_vals, diag_msgs, diag_level
 
             tmp = stdout.strip()
-            if not isinstance(tmp, str):
-                tmp_u = tmp.decode("UTF-8")
-            else:
-                tmp_u = unicode(tmp)
+            tmp_u = tmp.decode("UTF-8") if isinstance(tmp, bytes) else tmp
 
             if tmp_u.isnumeric():
                 temp = float(tmp) / 1000
@@ -435,8 +433,8 @@ class CPUMonitor():
                 self.cancel_timers()
             return
 
-        diag_vals = [ KeyValue(key = 'Update Status', value = 'OK' ),
-                      KeyValue(key = 'Time Since Last Update', value = str(0) ) ]
+        diag_vals = [KeyValue(key='Update Status', value='OK'),
+                     KeyValue(key='Time Since Last Update', value=str(0))]
         diag_msgs = []
         diag_level = 0
 
@@ -452,6 +450,7 @@ class CPUMonitor():
         else:
             message = stat_dict[diag_level]
 
+        # Update status
         with self._mutex:
             self._last_temp_time = rospy.get_time()
 
@@ -464,6 +463,16 @@ class CPUMonitor():
                 self._temps_timer.start()
             else:
                 self.cancel_timers()
+
+        # Restart temperature checking if it goes stale, #4171
+        # Need to run this without mutex
+        if rospy.get_time() - self._last_temp_time > 90:
+            self._restart_temp_check()
+
+        # Decode message attribute if it's a bytes object
+        if isinstance(self._temp_stat.message, bytes):
+            self._temp_stat.message = self._temp_stat.message.decode('utf-8')
+
 
     def check_usage(self):
         if rospy.is_shutdown():
@@ -520,8 +529,20 @@ class CPUMonitor():
             update_status_stale(self._temp_stat, self._last_temp_time)
             update_status_stale(self._usage_stat, self._last_usage_time)
 
+            # Decode the message attribute if it's a bytes object
+            if isinstance(self._temp_stat.message, bytes):
+                self._temp_stat.message = self._temp_stat.message.decode('utf-8')
+            if isinstance(self._usage_stat.message, bytes):
+                self._usage_stat.message = self._usage_stat.message.decode('utf-8')
+
+            # Ensure that all values in the DiagnosticArray message are converted to strings
             msg = DiagnosticArray()
             msg.header.stamp = rospy.get_rostime()
+
+
+            self.convert_to_str(self._temp_stat)
+            self.convert_to_str(self._usage_stat)
+
             msg.status.append(self._temp_stat)
             msg.status.append(self._usage_stat)
 
@@ -529,11 +550,21 @@ class CPUMonitor():
                 self._diag_pub.publish(msg)
                 self._last_publish_time = rospy.get_time()
 
+            print("publishing stats...")
+
 
         # Restart temperature checking if it goes stale, #4171
         # Need to run this without mutex
         if rospy.get_time() - self._last_temp_time > 90:
             self._restart_temp_check()
+
+    def convert_to_str(self, status):
+        status.name = str(status.name)
+        status.message = str(status.message)
+        status.hardware_id = str(status.hardware_id)
+        for value in status.values:
+            value.key = str(value.key)
+            value.value = str(value.value)
 
 
 if __name__ == '__main__':
@@ -546,12 +577,12 @@ if __name__ == '__main__':
                       help="Computer name in diagnostics output (ex: 'c1')",
                       metavar="DIAG_HOSTNAME",
                       action="store", default = hostname)
-    options, args = parser.parse_args(rospy.myargv())
+    options, args = parser.parse_args(sys.argv[1:])
 
     try:
         rospy.init_node('cpu_monitor_%s' % hostname)
     except rospy.exceptions.ROSInitException:
-        print >> sys.stderr, 'CPU monitor is unable to initialize node. Master may not be running.'
+        print('CPU monitor is unable to initialize node. Master may not be running.', file=sys.stderr)
         sys.exit(0)
 
     cpu_node = CPUMonitor(hostname, options.diag_hostname)
@@ -561,7 +592,7 @@ if __name__ == '__main__':
         while not rospy.is_shutdown():
             rate.sleep()
             cpu_node.publish_stats()
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as e:
         pass
     except Exception as e:
         traceback.print_exc()
