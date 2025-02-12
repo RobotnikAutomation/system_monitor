@@ -110,8 +110,8 @@ def ntp_monitor(offset=500, self_offset=500, diag_hostname = None, error_offset 
                 st.values = [ KeyValue("Offset (us)", "N/A"),
                               KeyValue("Offset tolerance (us)", str(off)),
                               KeyValue("Offset tolerance (us) for Error", str(error_offset)),
-                              KeyValue("Output", o),
-                              KeyValue("Errors", e) ]
+                              KeyValue("Output", o.decode()),
+                              KeyValue("Errors", e.decode()) ]
 
 
         msg = DiagnosticArray()
