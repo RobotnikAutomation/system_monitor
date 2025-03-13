@@ -143,12 +143,17 @@ class Monitor():
         aux_stat.space_reading = status.values[2].value
         num_disks = (len(status.values) - 3)/6
         num_disks = int(num_disks)
+        default_unit = 'G'
         for i in range(0,num_disks):
             disk = Disk()
             disk.id = i + 1
             disk.name = status.values[3 + i * 6].value
-            disk.size = float(status.values[4 + i * 6].value[:-1])
-            disk.available = float(status.values[5 + i * 6].value[:-1].replace(",", "."))
+            size = float((status.values[4 + i * 6].value[:-1]).replace(",", "."))
+            size_unit = status.values[4 + i * 6].value[-1]
+            available_size =float(status.values[5 + i * 6].value[:-1].replace(",", "."))
+            available_unit = status.values[5 + i * 6].value[-1]
+            disk.size = self.convert_size(size, size_unit, default_unit)
+            disk.available = self.convert_size(float(available_size), available_unit, default_unit)
             disk.use = float(status.values[6 + i * 6].value[:-1])
             disk.status = status.values[7 + i * 6].value
             disk.mount_point = status.values[8 + i * 6].value
@@ -156,6 +161,14 @@ class Monitor():
         self._diag_hdd.status = aux_stat
         #self.publish_info()
 
+    def convert_size(self, size, from_unit, to_unit): 
+        # Units: K,M,G,T,P,E,Z,Y
+        units = {'K': 0, 'M': 1, 'G': 2, 'T': 3, 'P': 4, 'E': 5, 'Z': 6, 'Y': 7}
+        if from_unit == to_unit:
+            return size
+        else:
+            return size * (1000 ** (units[from_unit] - units[to_unit]))
+        
     #Publish info
     def publish_info(self):
         msg = Diagnostic()
